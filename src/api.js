@@ -250,3 +250,16 @@ export function getPreviewUrl(
 ) {
   return `/api/projects/${projectId}/previews/${buildId}`;
 }
+
+export async function updateProjectFile(projectId, path, content) {
+  return request(
+    `/projects/${projectId}/files/content?path=${encodeURIComponent(path)}`,
+    {
+      method: "PUT",
+      body: {
+        path,
+        content
+      }
+    }
+  );
+}

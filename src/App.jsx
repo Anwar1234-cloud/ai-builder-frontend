@@ -16,6 +16,7 @@ import {
   getAgentTasks,
   getBuilds,
   getPreviewUrl,
+  updateProjectFile,
 } from "./api";
 
 import "./index.css";
@@ -107,8 +108,45 @@ function App() {
       : null;
   }, [builds]);
 
+const handleSaveFile = async () => {
+  if (!selectedFile || !selectedProject) return;
+
+  try {
+    setSaving(true);
+    setSaveMessage("");
+
+    await updateProjectFile(
+      selectedProject.id,
+      selectedFile.path,
+      editorContent
+    );
+
+    setSelectedFile({
+      ...selectedFile,
+      content: editorContent
+    });
+
+    setFiles(prev =>
+      prev.map(file =>
+        file.id === selectedFile.id
+          ? { ...file, content: editorContent }
+          : file
+      )
+    );
+
+    setSaveMessage("Saved");
+  } catch (error) {
+    console.error(error);
+    setSaveMessage("Save failed");
+  } finally {
+    setSaving(false);
+  }
+};
+
   const [selectedFile, setSelectedFile] = useState(null);
   const [editorContent, setEditorContent] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");  
 
   const handleFileSelect = (file) => {
   setSelectedFile(file);
@@ -390,7 +428,7 @@ function App() {
   if (path.endsWith(".md")) return "markdown";
 
   return "plaintext";
-};
+  };
 
   function handleKeyDown(
     event
@@ -934,16 +972,37 @@ function App() {
 
 <section className={`builder-panel editor-workspace ${expandedPanel && expandedPanel !== "editor" ? "panel-hidden" : ""}`}>
 
-  <div className="panel-title">
+  <div className="panel-title editor-title">
+
     <span>
       {selectedFile ? selectedFile.path : "Code Editor"}
     </span>
-    <button
-      className="panel-toggle"
-      onClick={() => toggleExpand("editor")}
-    >
-      {expandedPanel === "editor" ? "⤡" : "⤢"}
-    </button>
+
+    <div className="editor-actions">
+
+      {saveMessage && (
+        <span className="save-message">
+          {saveMessage}
+        </span>
+      )}
+
+      <button
+        className="save-button"
+        disabled={!selectedFile || saving}
+        onClick={handleSaveFile}
+      >
+        {saving ? "Saving..." : "Save"}
+      </button>
+
+      <button
+        className="panel-toggle"
+        onClick={() => toggleExpand("editor")}
+      >
+        {expandedPanel === "editor" ? "⤡" : "⤢"}
+      </button>
+
+    </div>
+
   </div>
 
   <div className="editor-panel">
