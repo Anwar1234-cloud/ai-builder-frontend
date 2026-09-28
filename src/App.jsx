@@ -17,6 +17,10 @@ import {
   getBuilds,
   getPreviewUrl,
   updateProjectFile,
+  createBuild,
+  executeBuild,
+  getBuild,
+  getAgentRun,
 } from "./api";
 
 import "./index.css";
@@ -51,6 +55,13 @@ function App() {
 
   const [files, setFiles] =
     useState([]);
+
+  const [agentRunId, setAgentRunId] = 
+    useState(null);
+  const [agentStatus, setAgentStatus] =
+    useState(null);
+  
+  
 
   const [conversations, setConversations] =
     useState([]);
@@ -96,7 +107,13 @@ function App() {
     useState("WEBSITE");
 
 
-  const [expandedPanel, setExpandedPanel] = useState(null); // null | "files" | "chat" | "editor" | "preview"
+  const [expandedPanel, setExpandedPanel] = useState(null); 
+
+  const [manualBuildLoading, setManualBuildLoading] =
+   useState(false);
+  const [buildMessage, setBuildMessage] = useState("");
+
+  
 
   function toggleExpand(panel) {
     setExpandedPanel(current => (current === panel ? null : panel));
@@ -107,6 +124,154 @@ function App() {
       ? builds[0]
       : null;
   }, [builds]);
+
+    const sleep = (ms) =>
+  new Promise(resolve => setTimeout(resolve, ms));
+
+ const pollAgentRun = async (
+   projectId,
+   runId
+  ) => {
+
+    while (true) {
+
+     const run =
+       await getAgentRun(
+         projectId,
+         runId
+        );
+
+        setAgentRunId(runId);
+
+     const currentTasks =
+      await getAgentTasks(
+        projectId,
+        runId
+      );
+
+     setTasks(currentTasks);
+
+     setAgentStatus(
+       run.status
+      );
+
+     const currentBuilds =
+       await getBuilds(
+         projectId
+        );
+
+      setBuilds(currentBuilds);
+
+      if (
+        run.status === "COMPLETED" ||
+        run.status === "FAILED"
+      ) {
+
+        const [
+          history,
+          finalFiles,
+          finalBuilds
+        ] = await Promise.all([
+          getMessages(
+            projectId,
+            conversationId
+          ),
+          getProjectFiles(
+            projectId
+          ),
+          getBuilds(
+            projectId
+          )
+        ]);
+
+        setMessages(history);
+        setFiles(finalFiles);
+        setBuilds(finalBuilds);
+
+        const successfulBuild =
+          finalBuilds.find(
+            build =>
+              build.status === "SUCCESS"
+          );
+
+        if (successfulBuild) {
+
+          setLatestBuild(
+            successfulBuild
+          );
+
+          setPreviewUrl(
+            `${getPreviewUrl(
+              projectId,
+              successfulBuild.id
+            )}?t=${Date.now()}`
+         );
+        }
+
+        break;
+      }
+
+      await sleep(1500);
+    }
+  }; 
+
+  const handleBuild = async () => {
+  if (!selectedProject) return;
+
+  try {
+    setManualBuildLoading(true);
+    setBuildMessage("Saving...");
+
+    // Save current editor changes first
+    if (selectedFile) {
+      await handleSaveFile();
+    }
+
+    setBuildMessage("Creating build...");
+
+    const build = await createBuild(selectedProject.id);
+
+    setBuildMessage("Building...");
+
+    await executeBuild(
+      selectedProject.id,
+      build.id
+    );
+
+    let currentBuild = build;
+
+    while (
+      currentBuild.status !== "SUCCESS" &&
+      currentBuild.status !== "FAILED"
+    ) {
+      await new Promise(resolve =>
+        setTimeout(resolve, 1500)
+      );
+
+      currentBuild = await getBuild(
+        selectedProject.id,
+        build.id
+      );
+    }
+
+    setBuilds(prev => [
+      currentBuild,
+      ...prev.filter(b => b.id !== currentBuild.id)
+    ]);
+
+    setBuildMessage(
+      currentBuild.status === "SUCCESS"
+        ? "Build successful"
+        : "Build failed"
+    );
+
+  } catch (error) {
+    console.error(error);
+    setBuildMessage("Build failed");
+  } finally {
+    setManualBuildLoading(false);
+  }
+};
 
 const handleSaveFile = async () => {
   if (!selectedFile || !selectedProject) return;
@@ -147,6 +312,7 @@ const handleSaveFile = async () => {
   const [editorContent, setEditorContent] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState("");  
+  
 
   const handleFileSelect = (file) => {
   setSelectedFile(file);
@@ -353,6 +519,7 @@ const handleSaveFile = async () => {
   }
 
   async function handleSend() {
+
     const trimmed =
       message.trim();
 
@@ -365,6 +532,7 @@ const handleSaveFile = async () => {
     }
 
     try {
+
       setLoading(true);
       setError("");
 
@@ -377,44 +545,33 @@ const handleSaveFile = async () => {
 
       setMessage("");
 
-      const history =
-        await getMessages(
-          selectedProject.id,
-          conversationId
+     // Agent run now starts immediately
+      if (response.agentRunId) {
+
+        setAgentRunId(
+          response.agentRunId
         );
 
-      setMessages(history);
+        setAgentStatus(
+          "RUNNING"
+        );
 
-      if (response.agentRunId) {
-        const newTasks =
-          await getAgentTasks(
-            selectedProject.id,
-            response.agentRunId
-          );
+        setTasks([]);
 
-        setTasks(newTasks);
+        await pollAgentRun(
+          selectedProject.id,
+          response.agentRunId
+       );
       }
 
-      const [
-        newFiles,
-        newBuilds,
-      ] = await Promise.all([
-        getProjectFiles(
-          selectedProject.id
-        ),
-        getBuilds(
-          selectedProject.id
-        ),
-      ]);
-
-      setFiles(newFiles);
-      setBuilds(newBuilds);
-
     } catch (err) {
+
       setError(
         err.message
       );
+
     } finally {
+
       setLoading(false);
     }
   }
@@ -978,30 +1135,44 @@ const handleSaveFile = async () => {
       {selectedFile ? selectedFile.path : "Code Editor"}
     </span>
 
-    <div className="editor-actions">
+<div className="editor-actions">
 
-      {saveMessage && (
-        <span className="save-message">
-          {saveMessage}
-        </span>
-      )}
+  {saveMessage && (
+    <span className="save-message">
+      {saveMessage}
+    </span>
+  )}
 
-      <button
-        className="save-button"
-        disabled={!selectedFile || saving}
-        onClick={handleSaveFile}
-      >
-        {saving ? "Saving..." : "Save"}
-      </button>
+  {buildMessage && (
+    <span className="save-message">
+      {buildMessage}
+    </span>
+  )}
 
-      <button
-        className="panel-toggle"
-        onClick={() => toggleExpand("editor")}
-      >
-        {expandedPanel === "editor" ? "⤡" : "⤢"}
-      </button>
+  <button
+    className="save-button"
+    disabled={!selectedFile || saving}
+    onClick={handleSaveFile}
+  >
+    {saving ? "Saving..." : "Save"}
+  </button>
 
-    </div>
+  <button
+    className="build-editor-button"
+    disabled={manualBuildLoading}
+    onClick={handleBuild}
+  >
+    {manualBuildLoading ? "Building..." : "Build"}
+  </button>
+
+  <button
+    className="panel-toggle"
+    onClick={() => toggleExpand("editor")}
+  >
+    {expandedPanel === "editor" ? "⤡" : "⤢"}
+  </button>
+
+</div>
 
   </div>
 
@@ -1086,6 +1257,24 @@ const handleSaveFile = async () => {
         <div className="task-heading">
           Agent Tasks
         </div>
+
+        {agentStatus && (
+          <div className="agent-status">
+            <span
+              className={
+                agentStatus === "RUNNING"
+                  ? "status-dot running"
+                  : agentStatus === "COMPLETED"
+                  ? "status-dot completed"
+                  : "status-dot failed"
+              }
+            />
+
+            <span>
+              Agent: {agentStatus}
+            </span>
+          </div>
+        )}
 
         <div className="task-items">
 

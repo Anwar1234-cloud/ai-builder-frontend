@@ -263,3 +263,39 @@ export async function updateProjectFile(projectId, path, content) {
     }
   );
 }
+
+export async function createBuild(projectId) {
+  return request(
+    `/projects/${projectId}/builds?command=${encodeURIComponent("npm run build")}`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export async function executeBuild(projectId, buildId) {
+  return request(
+    `/projects/${projectId}/builds/${buildId}/execute`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export async function getBuild(projectId, buildId) {
+  return request(
+    `/projects/${projectId}/builds/${buildId}`,
+    {
+      method: "GET"
+    }
+  );
+}
+
+export async function getAgentRun(projectId, runId) {
+  return request(
+    `/projects/${projectId}/agent-runs/${runId}`,
+    {
+      method: "GET"
+    }
+  );
+}
