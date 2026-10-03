@@ -299,3 +299,21 @@ export async function getAgentRun(projectId, runId) {
     }
   );
 }
+
+export async function getVersions(projectId) {
+  return request(
+    `/projects/${projectId}/versions`,
+    {
+      method: "GET"
+    }
+  )
+}
+
+export async function restoreVersion(projectId, versionNumber) {
+  return request(
+    `/projects/${projectId}/versions/${versionNumber}/restore`,
+    {
+      method: "POST"
+    }
+  )
+}

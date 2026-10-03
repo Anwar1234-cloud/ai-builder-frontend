@@ -21,6 +21,8 @@ import {
   executeBuild,
   getBuild,
   getAgentRun,
+  getVersions,
+  restoreVersion,
 } from "./api";
 
 import "./index.css";
@@ -113,6 +115,12 @@ function App() {
    useState(false);
   const [buildMessage, setBuildMessage] = useState("");
 
+  const [versions, setVersions] =
+   useState([]);
+
+  const [restoringVersion, setRestoringVersion] =
+   useState(null);
+
   
 
   function toggleExpand(panel) {
@@ -196,9 +204,7 @@ function App() {
 
         if (successfulBuild) {
 
-          setLatestBuild(
-            successfulBuild
-          );
+
 
           setPreviewUrl(
             `${getPreviewUrl(
@@ -598,6 +604,148 @@ const handleSaveFile = async () => {
       handleSend();
     }
   }
+
+    const handleRestoreVersion = async (version) => {
+    if (!selectedProject) return;
+
+    const confirmed = window.confirm(
+      `Restore version ${version.versionNumber}?`
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setRestoringVersion(
+        version.versionNumber
+      );
+
+      // Restore version in backend
+      await restoreVersion(
+        selectedProject.id,
+        version.versionNumber
+      );
+
+      // Reload project files
+      const newFiles =
+        await getProjectFiles(
+          selectedProject.id
+        );
+
+      setFiles(newFiles);
+
+      // Clear currently open editor
+      setSelectedFile(null);
+      setEditorContent("");
+
+      // Reload versions
+      const newVersions =
+        await getVersions(
+          selectedProject.id
+        );
+
+      setVersions(newVersions);
+
+      // Build restored project
+      const build =
+        await createBuild(
+          selectedProject.id
+        );
+
+      setBuildMessage(
+        "Building restored version..."
+      );
+
+      await executeBuild(
+        selectedProject.id,
+        build.id
+      );
+
+      let currentBuild = build;
+
+      while (
+        currentBuild.status !== "SUCCESS" &&
+        currentBuild.status !== "FAILED"
+      ) {
+        await new Promise(
+          resolve =>
+            setTimeout(resolve, 1500)
+        );
+
+        currentBuild =
+          await getBuild(
+            selectedProject.id,
+            build.id
+          );
+      }
+
+      setLatestBuild(
+        currentBuild
+      );
+
+      setBuilds(
+        await getBuilds(
+          selectedProject.id
+        )
+      );
+
+      if (
+        currentBuild.status === "SUCCESS"
+      ) {
+        setPreviewUrl(
+          `${getPreviewUrl(
+            selectedProject.id,
+            currentBuild.id
+          )}?t=${Date.now()}`
+        );
+
+        setBuildMessage(
+          `Version ${version.versionNumber} restored successfully`
+        );
+      } else {
+        setBuildMessage(
+          "Restored version but build failed"
+       );
+      }
+
+    } catch (error) {
+
+      console.error(error);
+
+      setBuildMessage(
+        "Restore failed"
+      );
+
+    } finally {
+
+      setRestoringVersion(null);
+    }
+  };
+
+  useEffect(() => {
+  if (!selectedProject) {
+    setVersions([]);
+    return;
+  }
+
+  const loadVersions = async () => {
+    try {
+      const data = await getVersions(
+        selectedProject.id
+      );
+
+      setVersions(data);
+    } catch (error) {
+      console.error(
+        "Failed to load versions:",
+        error
+      );
+    }
+  };
+
+  loadVersions();
+}, [selectedProject]);
 
   if (!authenticated) {
     return (
@@ -1021,17 +1169,17 @@ const handleSaveFile = async () => {
 
         <aside className={`builder-panel files-panel ${expandedPanel && expandedPanel !== "files" ? "panel-hidden" : ""}`}>
 
-          <div className="panel-title">
-            <span>Files</span>
-            <button
-              className="panel-toggle"
-              onClick={() => toggleExpand("files")}
-            >
-              {expandedPanel === "files" ? "⤡" : "⤢"}
-            </button>
-          </div>
+            <div className="panel-title">
+              <span>Files</span>
+              <button
+                className="panel-toggle"
+                onClick={() => toggleExpand("files")}
+              >
+                {expandedPanel === "files" ? "⤡" : "⤢"}
+              </button>
+            </div>
 
-      <div className="file-list">
+          <div className="file-list">
 
             {files.map(file => (
           <div
@@ -1053,10 +1201,12 @@ const handleSaveFile = async () => {
           </div>
             ))}
 
-      </div>
-
+          </div>
         </aside>
 
+
+
+      
          {/* CHAT */}
 
 <section className={`builder-panel chat-panel ${expandedPanel && expandedPanel !== "chat" ? "panel-hidden" : ""}`}>
@@ -1209,17 +1359,46 @@ const handleSaveFile = async () => {
 
 {/* PREVIEW */}
 
-<section className={`builder-panel preview-panel ${expandedPanel && expandedPanel !== "preview" ? "panel-hidden" : ""}`}>
+<section
+  className={`builder-panel preview-panel ${
+    expandedPanel && expandedPanel !== "preview"
+      ? "panel-hidden"
+      : ""
+  } ${
+    expandedPanel === "preview"
+      ? "panel-expanded"
+      : ""
+  }`}
+>
   <div className="panel-title">
     <span>Preview</span>
-    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "8px"
+      }}
+    >
       {latestBuild && (
-        <span className={latestBuild.status === "SUCCESS" ? "build-status success" : "build-status"}>
+        <span
+          className={
+            latestBuild.status === "SUCCESS"
+              ? "build-status success"
+              : "build-status"
+          }
+        >
           {latestBuild.status}
         </span>
       )}
-      <button className="expand-button" onClick={() => toggleExpand("preview")}>
-        {expandedPanel === "preview" ? "⤡" : "⤢"}
+
+      <button
+        className="expand-button"
+        onClick={() => toggleExpand("preview")}
+      >
+        {expandedPanel === "preview"
+          ? "⤡"
+          : "⤢"}
       </button>
     </div>
   </div>
@@ -1249,6 +1428,78 @@ const handleSaveFile = async () => {
   </div>
 
 </section>
+
+
+{/* VERSION HISTORY */}
+
+<div
+  className={`version-history ${
+    expandedPanel
+      ? "panel-hidden"
+      : ""
+  }`}
+>
+
+  <div className="version-history-title">
+    Version History
+  </div>
+
+  {versions.length === 0 ? (
+    <div className="version-empty">
+      No versions yet
+    </div>
+  ) : (
+    <div className="version-list">
+
+      {versions.map(version => (
+        <div
+          key={version.versionNumber}
+          className="version-item"
+        >
+
+          <div className="version-info">
+
+            <div className="version-number">
+              v{version.versionNumber}
+            </div>
+
+            <div className="version-message">
+              {version.message ||
+                "Project version"}
+            </div>
+
+            <div className="version-source">
+              {version.source ||
+                "SYSTEM"}
+            </div>
+
+          </div>
+
+          <button
+            className="restore-button"
+            disabled={
+              restoringVersion ===
+              version.versionNumber
+            }
+            onClick={() =>
+              handleRestoreVersion(
+                version
+              )
+            }
+          >
+            {restoringVersion ===
+            version.versionNumber
+              ? "Restoring..."
+              : "Restore"}
+          </button>
+
+        </div>
+      ))}
+
+    </div>
+  )}
+
+</div>
 
       </main>
 
