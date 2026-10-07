@@ -317,3 +317,32 @@ export async function restoreVersion(projectId, versionNumber) {
     }
   )
 }
+
+// ==================== DEPLOYMENTS ====================
+
+export async function deployProject(projectId) {
+  return request(
+    `/projects/${projectId}/deployments`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export async function getLatestDeployment(projectId) {
+  return request(
+    `/projects/${projectId}/deployments/latest`,
+    {
+      method: "GET"
+    }
+  );
+}
+
+export async function getDeployments(projectId) {
+  return request(
+    `/projects/${projectId}/deployments`,
+    {
+      method: "GET"
+    }
+  );
+}

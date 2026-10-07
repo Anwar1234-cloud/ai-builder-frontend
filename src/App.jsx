@@ -23,6 +23,8 @@ import {
   getAgentRun,
   getVersions,
   restoreVersion,
+  deployProject,
+  getLatestDeployment, 
 } from "./api";
 
 import "./index.css";
@@ -120,6 +122,15 @@ function App() {
 
   const [restoringVersion, setRestoringVersion] =
    useState(null);
+
+  const [deployment, setDeployment] =
+   useState(null);
+
+  const [deploying, setDeploying] =
+   useState(false);
+
+  const [deploymentMessage, setDeploymentMessage] =
+   useState("");
 
   
 
@@ -276,6 +287,44 @@ function App() {
     setBuildMessage("Build failed");
   } finally {
     setManualBuildLoading(false);
+  }
+};
+
+const handleDeploy = async () => {
+  if (!selectedProject || deploying) {
+    return;
+  }
+
+  try {
+    setDeploying(true);
+    setDeploymentMessage("Deploying...");
+
+    const result = await deployProject(
+      selectedProject.id
+    );
+
+    setDeployment(result);
+
+    if (result.status === "DEPLOYED") {
+      setDeploymentMessage("Live");
+    } else {
+      setDeploymentMessage(
+        result.status || "Deployment started"
+      );
+    }
+
+  } catch (error) {
+    console.error(
+      "Deployment failed:",
+      error
+    );
+
+    setDeploymentMessage(
+      error.message || "Deployment failed"
+    );
+
+  } finally {
+    setDeploying(false);
   }
 };
 
@@ -449,6 +498,49 @@ const handleSaveFile = async () => {
     }
   }
 
+  useEffect(() => {
+  if (!selectedProject) {
+    setDeployment(null);
+    setDeploymentMessage("");
+    return;
+  }
+
+  let cancelled = false;
+
+  const loadLatestDeployment = async () => {
+    try {
+      const data =
+        await getLatestDeployment(
+          selectedProject.id
+        );
+
+      if (!cancelled) {
+        setDeployment(data);
+
+        if (data?.status === "DEPLOYED") {
+          setDeploymentMessage("Live");
+        }
+      }
+
+    } catch (error) {
+      /*
+       * A project may never have been deployed.
+       * That is not a builder error.
+       */
+      if (!cancelled) {
+        setDeployment(null);
+        setDeploymentMessage("");
+      }
+    }
+  };
+
+  loadLatestDeployment();
+
+  return () => {
+    cancelled = true;
+  };
+}, [selectedProject]);
+
   async function openProject(
     project
   ) {
@@ -514,15 +606,19 @@ const handleSaveFile = async () => {
     }
   }
 
-  function goBack() {
-    setSelectedProject(null);
-    setConversationId(null);
-    setMessages([]);
-    setTasks([]);
-    setFiles([]);
-    setBuilds([]);
-    setError("");
-  }
+function goBack() {
+  setSelectedProject(null);
+  setConversationId(null);
+  setMessages([]);
+  setTasks([]);
+  setFiles([]);
+  setBuilds([]);
+
+  setDeployment(null);
+  setDeploymentMessage("");
+
+  setError("");
+}
 
   async function handleSend() {
 
@@ -1299,6 +1395,19 @@ const handleSaveFile = async () => {
     </span>
   )}
 
+  {deploymentMessage &&
+  deployment?.status !== "DEPLOYED" && (
+    <span
+      className={
+        deploymentMessage === "Deploying..."
+          ? "deployment-message"
+          : "deployment-message"
+      }
+    >
+      {deploymentMessage}
+    </span>
+  )}
+
   <button
     className="save-button"
     disabled={!selectedFile || saving}
@@ -1307,18 +1416,53 @@ const handleSaveFile = async () => {
     {saving ? "Saving..." : "Save"}
   </button>
 
-  <button
-    className="build-editor-button"
-    disabled={manualBuildLoading}
-    onClick={handleBuild}
-  >
-    {manualBuildLoading ? "Building..." : "Build"}
-  </button>
+<button
+  className="build-editor-button"
+  disabled={manualBuildLoading}
+  onClick={handleBuild}
+>
+  {manualBuildLoading
+    ? "Building..."
+    : "Build"}
+</button>
 
-  <button
-    className="panel-toggle"
-    onClick={() => toggleExpand("editor")}
-  >
+<button
+  className="deploy-editor-button"
+  disabled={
+    deploying ||
+    latestBuild?.status !== "SUCCESS"
+  }
+  onClick={handleDeploy}
+  title={
+    latestBuild?.status !== "SUCCESS"
+      ? "A successful build is required before deployment"
+      : "Deploy project to Vercel"
+  }
+>
+  {deploying
+    ? "Deploying..."
+    : deployment?.status === "DEPLOYED"
+    ? "Redeploy"
+    : "Deploy"}
+</button>
+
+{deployment?.status === "DEPLOYED" &&
+  deployment?.deploymentUrl && (
+    <a
+      className="live-site-button"
+      href={deployment.deploymentUrl}
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      <span className="live-dot" />
+      Live ↗
+    </a>
+  )}
+
+<button
+  className="panel-toggle"
+  onClick={() => toggleExpand("editor")}
+>
     {expandedPanel === "editor" ? "⤡" : "⤢"}
   </button>
 
