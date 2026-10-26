@@ -25,24 +25,28 @@ async function request(url, options = {}) {
 
   let body = options.body;
 
-  if (
-    body &&
-    typeof body !== "string"
-  ) {
-    headers["Content-Type"] =
-      "application/json";
-
+  if (body && typeof body !== "string") {
+    headers["Content-Type"] = "application/json";
     body = JSON.stringify(body);
   }
 
-  const response = await fetch(
-    `${API_BASE}${url}`,
-    {
-      ...options,
-      headers,
-      body,
-    }
-  );
+  if (url.includes("/deployments")) {
+    console.log("[DEPLOY FETCH]", {
+      url,
+      method: options.method || "GET",
+      tokenPresent: Boolean(token),
+      authHeaderAttached: Boolean(headers.Authorization),
+    });
+  }
+
+  const response = await fetch(`${API_BASE}${url}`, {
+    ...options,
+    headers,
+    body,
+  });
+
+  
+
 
   const contentType =
     response.headers.get("content-type") || "";
@@ -329,6 +333,15 @@ export async function deployProject(projectId) {
   );
 }
 
+export async function deployFullStackProject(projectId) {
+  return request(
+    `/projects/${projectId}/deployments/fullstack`,
+    {
+      method: "POST"
+    }
+  );
+}
+
 export async function getLatestDeployment(projectId) {
   return request(
     `/projects/${projectId}/deployments/latest`,
@@ -345,4 +358,23 @@ export async function getDeployments(projectId) {
       method: "GET"
     }
   );
+}
+
+export async function createPreviewSession(projectId) {
+  return request(
+    `/projects/${projectId}/preview-session`,
+    {
+      method: "POST"
+    }
+  );
+}
+
+export async function startGeneratedRuntime(projectId) {
+  return request(`/internal/fullstack/${projectId}/runtime/start`, {
+    method: "POST",
+  });
+}
+
+export async function getGeneratedRuntimeStatus(projectId) {
+  return request(`/internal/fullstack/${projectId}/runtime/status`);
 }

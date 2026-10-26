@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+﻿import { useEffect, useMemo, useState } from "react";
 import Editor from "@monaco-editor/react";
 
 import {
@@ -16,6 +16,8 @@ import {
   getAgentTasks,
   getBuilds,
   getPreviewUrl,
+  createPreviewSession,
+  startGeneratedRuntime,
   updateProjectFile,
   createBuild,
   executeBuild,
@@ -24,6 +26,7 @@ import {
   getVersions,
   restoreVersion,
   deployProject,
+  deployFullStackProject,
   getLatestDeployment, 
 } from "./api";
 
@@ -147,90 +150,36 @@ function App() {
     const sleep = (ms) =>
   new Promise(resolve => setTimeout(resolve, ms));
 
- const pollAgentRun = async (
-   projectId,
-   runId
-  ) => {
+const pollAgentRun = async (projectId, runId) => {
+  while (true) {
+    const run = await getAgentRun(projectId, runId);
 
-    while (true) {
+    setAgentRunId(runId);
 
-     const run =
-       await getAgentRun(
-         projectId,
-         runId
-        );
+    const currentTasks = await getAgentTasks(projectId, runId);
+    setTasks(currentTasks);
+    setAgentStatus(run.status);
 
-        setAgentRunId(runId);
+    const currentBuilds = await getBuilds(projectId);
+    setBuilds(currentBuilds);
 
-     const currentTasks =
-      await getAgentTasks(
-        projectId,
-        runId
-      );
+    if (run.status === "COMPLETED" || run.status === "FAILED") {
+      const [history, finalFiles, finalBuilds] = await Promise.all([
+        getMessages(projectId, conversationId),
+        getProjectFiles(projectId),
+        getBuilds(projectId),
+      ]);
 
-     setTasks(currentTasks);
+      setMessages(history);
+      setFiles(finalFiles);
+      setBuilds(finalBuilds);
 
-     setAgentStatus(
-       run.status
-      );
-
-     const currentBuilds =
-       await getBuilds(
-         projectId
-        );
-
-      setBuilds(currentBuilds);
-
-      if (
-        run.status === "COMPLETED" ||
-        run.status === "FAILED"
-      ) {
-
-        const [
-          history,
-          finalFiles,
-          finalBuilds
-        ] = await Promise.all([
-          getMessages(
-            projectId,
-            conversationId
-          ),
-          getProjectFiles(
-            projectId
-          ),
-          getBuilds(
-            projectId
-          )
-        ]);
-
-        setMessages(history);
-        setFiles(finalFiles);
-        setBuilds(finalBuilds);
-
-        const successfulBuild =
-          finalBuilds.find(
-            build =>
-              build.status === "SUCCESS"
-          );
-
-        if (successfulBuild) {
-
-
-
-          setPreviewUrl(
-            `${getPreviewUrl(
-              projectId,
-              successfulBuild.id
-            )}?t=${Date.now()}`
-         );
-        }
-
-        break;
-      }
-
-      await sleep(1500);
+      break;
     }
-  }; 
+
+    await sleep(1500);
+  }
+};
 
   const handleBuild = async () => {
   if (!selectedProject) return;
@@ -295,13 +244,16 @@ const handleDeploy = async () => {
     return;
   }
 
+ 
+
   try {
     setDeploying(true);
     setDeploymentMessage("Deploying...");
 
-    const result = await deployProject(
-      selectedProject.id
-    );
+  const result =
+  selectedProject.type === "FULL_STACK_APP"
+    ? await deployFullStackProject(selectedProject.id)
+    : await deployProject(selectedProject.id);
 
     setDeployment(result);
 
@@ -374,14 +326,70 @@ const handleSaveFile = async () => {
   setEditorContent(file.content || "");
   };
 
-  const previewUrl =
-    selectedProject &&
-    latestBuild?.status === "SUCCESS"
-      ? getPreviewUrl(
-          selectedProject.id,
-          latestBuild.id
-        )
-      : null;
+ const previewUrl =
+  selectedProject &&
+  latestBuild?.status === "SUCCESS"
+    ? getPreviewUrl(selectedProject.id, latestBuild.id)
+    : null;
+
+const [previewSessionReady, setPreviewSessionReady] = useState(false);
+const [previewError, setPreviewError] = useState("");
+
+useEffect(() => {
+  let cancelled = false;
+
+  setPreviewSessionReady(false);
+  setPreviewError("");
+
+  if (!previewUrl || !selectedProject) {
+    return;
+  }
+
+  // Preserve existing preview behavior for non-full-stack projects.
+  if (selectedProject.type !== "FULL_STACK_APP") {
+    setPreviewSessionReady(true);
+    return;
+  }
+
+  async function initializeFullStackPreview() {
+    try {
+      console.log(
+        "Starting generated backend for project:",
+        selectedProject.id
+      );
+
+      // Starts the generated backend and waits until it is ready.
+      await startGeneratedRuntime(selectedProject.id);
+
+      if (cancelled) return;
+
+      console.log("Generated backend started successfully");
+
+      // Create the preview cookie only after backend startup.
+      await createPreviewSession(selectedProject.id);
+
+      if (cancelled) return;
+
+      console.log("Preview session created successfully");
+
+      setPreviewSessionReady(true);
+    } catch (error) {
+      if (cancelled) return;
+
+      console.error("Full-stack preview initialization failed:", error);
+
+      setPreviewError(
+        error?.message || "Failed to initialize full-stack preview."
+      );
+    }
+  }
+
+  initializeFullStackPreview();
+
+  return () => {
+    cancelled = true;
+  };
+}, [selectedProject?.id, selectedProject?.type, previewUrl]);
 
   useEffect(() => {
     if (authenticated) {
@@ -776,9 +784,7 @@ function goBack() {
           );
       }
 
-      setLatestBuild(
-        currentBuild
-      );
+      
 
       setBuilds(
         await getBuilds(
@@ -789,12 +795,6 @@ function goBack() {
       if (
         currentBuild.status === "SUCCESS"
       ) {
-        setPreviewUrl(
-          `${getPreviewUrl(
-            selectedProject.id,
-            currentBuild.id
-          )}?t=${Date.now()}`
-        );
 
         setBuildMessage(
           `Version ${version.versionNumber} restored successfully`
@@ -1549,13 +1549,18 @@ function goBack() {
 
   <div className="preview-area">
 
-    {previewUrl ? (
-      <iframe
-        title="Preview"
-        src={previewUrl}
-        className="preview-frame"
-      />
-    ) : (
+{previewError ? (
+  <div className="preview-empty">
+    <h3>Preview failed to start</h3>
+    <p>{previewError}</p>
+  </div>
+) : previewUrl && previewSessionReady ? (
+  <iframe
+    title="Preview"
+    src={previewUrl}
+    className="preview-frame"
+  />
+) : (
       <div className="preview-empty">
 
         <h3>

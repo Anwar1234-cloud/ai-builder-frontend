@@ -1198,3 +1198,31 @@ textarea {
 
   font-size: 12px;
 }
+
+/* Prevent long filenames from hiding editor buttons */
+
+.editor-title {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 12px;
+}
+
+.editor-title > span:first-child {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.editor-actions > button {
+  flex-shrink: 0;
+}
